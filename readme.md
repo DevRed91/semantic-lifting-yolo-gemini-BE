@@ -33,9 +33,7 @@ This service provides an API endpoint that:
 
 3. Start the development server:
    ```bash
-   npm run dev
-   # OR
-   npx ts-node server.ts
+   npx server.ts
    ```
 
 ## API Documentation
