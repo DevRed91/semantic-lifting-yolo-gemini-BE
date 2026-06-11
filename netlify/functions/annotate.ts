@@ -18,9 +18,7 @@ const envAllowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || "")
   .split(",")
   .map((origin) => normalizeOrigin(origin))
   .filter(Boolean);
-const defaultAllowedOrigins = [
-  "https://auto-annotate.netlify.app",
-];
+const defaultAllowedOrigins = ["https://auto-annotate.netlify.app"];
 const allowedOrigins = Array.from(
   new Set(
     [...envAllowedOrigins, ...defaultAllowedOrigins].map((origin) =>

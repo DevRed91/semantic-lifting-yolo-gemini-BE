@@ -1,7 +1,25 @@
 import express from "express";
 import cors from "cors";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType, type Schema } from "@google/generative-ai";
 import dotenv from "dotenv";
+
+const annotationSchema: Schema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    objects: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          label: { type: SchemaType.STRING },
+          box: { type: SchemaType.ARRAY, items: { type: SchemaType.NUMBER } },
+        },
+        required: ["label", "box"],
+      },
+    },
+  },
+  required: ["objects"],
+};
 import fs from "fs";
 
 dotenv.config();
@@ -15,8 +33,6 @@ const envAllowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || "")
   .filter(Boolean);
 const defaultAllowedOrigins = [
   "https://auto-annotate.netlify.app",
-  "https://www.auto-annotate.netlify.app",
-  "https://main--auto-annotate.netlify.app",
 ];
 const isProduction = process.env.NODE_ENV === "production";
 const devOrigins = ["http://localhost:5173", "http://127.0.0.1:5173"];
@@ -184,7 +200,13 @@ app.post(
       const base64Data = image.includes(",") ? image.split(",")[1] : image;
       fs.writeFileSync("debug_snapshot.jpg", Buffer.from(base64Data, "base64"));
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+      const model = genAI.getGenerativeModel({
+        model: MODEL_NAME,
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: annotationSchema,
+        },
+      });
 
       const result = await model.generateContent([
         prompt,
@@ -194,11 +216,7 @@ app.post(
       const text = result.response.text();
       console.log("Raw Response:", text);
 
-      // Robust Regex: Matches an array [...] OR an object {...}
-      const jsonMatch = text.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
-      if (!jsonMatch) throw new Error("No JSON found in response");
-
-      const parsed = JSON.parse(jsonMatch[0]);
+      const parsed = JSON.parse(text);
       // Send the standardized format
       res.json(parsed);
     } catch (error: any) {
