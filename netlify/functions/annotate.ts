@@ -12,18 +12,21 @@ type Result = {
   body: string;
 };
 
-const normalizeOrigin = (origin: string): string => origin.trim().replace(/\/$/, "");
+const normalizeOrigin = (origin: string): string =>
+  origin.trim().replace(/\/$/, "");
 const envAllowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || "")
   .split(",")
   .map((origin) => normalizeOrigin(origin))
   .filter(Boolean);
 const defaultAllowedOrigins = [
   "https://auto-annotate.netlify.app",
-  "https://www.auto-annotate.netlify.app",
-  "https://main--auto-annotate.netlify.app",
 ];
 const allowedOrigins = Array.from(
-  new Set([...envAllowedOrigins, ...defaultAllowedOrigins].map((origin) => normalizeOrigin(origin))),
+  new Set(
+    [...envAllowedOrigins, ...defaultAllowedOrigins].map((origin) =>
+      normalizeOrigin(origin),
+    ),
+  ),
 );
 
 const isOriginAllowed = (origin: string | undefined): boolean => {
@@ -32,7 +35,10 @@ const isOriginAllowed = (origin: string | undefined): boolean => {
   return allowedOrigins.includes(normalizeOrigin(origin));
 };
 
-const getHeader = (headers: Record<string, string | undefined>, key: string): string | undefined => {
+const getHeader = (
+  headers: Record<string, string | undefined>,
+  key: string,
+): string | undefined => {
   const target = key.toLowerCase();
   for (const [name, value] of Object.entries(headers)) {
     if (name.toLowerCase() === target) return value;
@@ -40,8 +46,15 @@ const getHeader = (headers: Record<string, string | undefined>, key: string): st
   return undefined;
 };
 
-const resolveRequestedHeaders = (requestHeaders: string | undefined): string => {
-  const defaults = ["Content-Type", "Authorization", "bypass-tunnel-reminder", "ngrok-skip-browser-warning"];
+const resolveRequestedHeaders = (
+  requestHeaders: string | undefined,
+): string => {
+  const defaults = [
+    "Content-Type",
+    "Authorization",
+    "bypass-tunnel-reminder",
+    "ngrok-skip-browser-warning",
+  ];
   if (!requestHeaders) return defaults.join(", ");
   const requested = requestHeaders
     .split(",")
@@ -50,7 +63,10 @@ const resolveRequestedHeaders = (requestHeaders: string | undefined): string => 
   return Array.from(new Set([...defaults, ...requested])).join(", ");
 };
 
-const corsHeaders = (origin: string | undefined, requestHeaders: string | undefined): Record<string, string> => {
+const corsHeaders = (
+  origin: string | undefined,
+  requestHeaders: string | undefined,
+): Record<string, string> => {
   const resolvedOrigin = isOriginAllowed(origin) ? origin || "*" : "null";
   return {
     "Access-Control-Allow-Origin": resolvedOrigin,
@@ -69,7 +85,10 @@ const extractJsonFromResponse = (text: string): unknown => {
 
 export const handler = async (event: Event): Promise<Result> => {
   const origin = getHeader(event.headers, "origin");
-  const requestHeaders = getHeader(event.headers, "access-control-request-headers");
+  const requestHeaders = getHeader(
+    event.headers,
+    "access-control-request-headers",
+  );
   const headers = corsHeaders(origin, requestHeaders);
 
   if (event.httpMethod === "OPTIONS") {
