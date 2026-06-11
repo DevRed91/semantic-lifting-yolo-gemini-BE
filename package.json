@@ -13,7 +13,8 @@
     "multer": "^2.1.1"
   },
   "scripts": {
-    "start": "ts-node index.ts"
+    "start": "ts-node server.ts",
+    "start:demo": "ts-node index.ts"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
