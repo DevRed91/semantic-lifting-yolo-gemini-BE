@@ -88,29 +88,25 @@ app.use(express.json({ limit: "20mb" }));
 // ============================================================================
 // Helpers
 // ============================================================================
-function buildPrompt(box: number[]): string {
+function buildPrompt(clickX: any, clickY: any): string {
   return `
-    Analyze this image. Identify ALL significant physical objects (furniture, decorations, etc).
+    Analyze this 3D scene snapshot. The user has clicked on the coordinates (x: ${clickX}, y: ${clickY}).
     
-    For each object found, perform classification.
-    Return ONLY raw JSON with an "objects" key containing an array of objects.
+    TASK:
+    1. Identify the specific object located exactly at those coordinates.
+    2. Provide a descriptive label (e.g., "Regency-style Armchair").
+    3. Provide an engaging, museum-style description of the object (2-3 sentences).
     
-    Format:
+    Return ONLY raw JSON in this format:
     {
-      "objects": [
-        {"label": "sofa", "box": [ymin, xmin, ymax, xmax]},
-        {"label": "frame", "box": [ymin, xmin, ymax, xmax]}
-      ]
+      "label": "string",
+      "description": "string"
     }
 
     Rules:
-    1. 'label' MUST be either 'sofa' or 'frame' based on visual features. Do NOT use the word 'objects' as a label.
-    2. If no objects found, return {"objects": []}.
-    3. No markdown, no backticks.
-    4. Use normalized 0-1 coordinates.
-    5. Focus on the region: ${JSON.stringify(box)}.
-
-    IMPORTANT: Perform visual analysis to differentiate. If it has pillows and back cushions, label it 'sofa'. If it has a visible border on a wall, label it 'frame'.
+    - Coordinates are normalized 0-1 (0,0 is top-left).
+    - If the click hits furniture, be specific about its style or materials.
+    - No markdown, no backticks.
   `;
 }
 
@@ -173,7 +169,7 @@ app.post(
       });
 
       const result = await model.generateContent([
-        buildPrompt(box),
+        buildPrompt(clickX, clickY),
         { inlineData: { data: base64Data, mimeType: "image/jpeg" } },
       ]);
 
@@ -181,7 +177,7 @@ app.post(
       console.log("Raw Response:", text);
 
       const parsed = JSON.parse(text);
-      res.json(parsed);
+      res.json(Array.isArray(parsed) ? parsed : (parsed.objects ?? []));
     } catch (error: any) {
       console.error("SERVER ERROR:", error.message);
       res.status(500).json({ error: "Failed to annotate" });
