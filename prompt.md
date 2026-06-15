@@ -1,32 +1,5 @@
-PHASE 0: REFRACTORING & SOCKET.IO SETUP      
-- Add Socket.io server to backend server.ts  
-- Replace sync file writing with async paths 
-- Establish client-side Socket.io listener 
-
-import { createServer } from "http";
-import { Server } from "socket.io";
-
-const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: { origin: "*" }
-});
-
-io.on("connection", (socket) => {
-  socket.on("request_annotation", async ({ image, box, clickX, clickY }) => {
-    try {
-      // 1. Instant YOLO response (The Glow)
-      const yolo = await callYoloService(image); 
-      socket.emit("mask_ready", { mask: yolo.mask, label: yolo.label });
-
-      // 2. Later Gemini response (The Museum Description)
-      const gemini = await callGemini(image, yolo.label);
-      socket.emit("description_ready", { description: gemini.description });
-      
-    } catch (err) {
-      socket.emit("error", "Vision pipeline failed");
-    }
-  });
-});
-
-// Replace app.listen with httpServer.listen
-httpServer.listen(3000, () => console.log("Server with WebSockets on 3000"));
+#INSTRUCTIONS:
+High-Performance Backend (YOLO & Gemini Pipelines) Check:
+1.YOLO Pipeline: Set up a lightweight FastAPI microservice to run YOLO segmentations.
+2.Dual-Channel Processing: Update the backend orchestrator: when a click occurs, it forwards the snapshot to YOLO (fast) and Gemini (slow). YOLO mask data is pushed immediately to the client via Socket.io (mask_ready), followed by Gemini's text descriptions (description_ready).
+3.Structured Outputs: Fix the Gemini response schema in server.ts to separate the coordinates from the detailed description prompt, resolving the current structure mismatch

@@ -1,0 +1,26 @@
+services:
+  yolo-service:
+    build:
+      context: ./python-yolo-service
+    container_name: yolo-service
+    ports:
+      - "8000:8000"
+    environment:
+      - YOLO_MODEL=yolov8n-seg.pt
+      - YOLO_CONF=0.25
+      - YOLO_IOU=0.45
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: annotation-backend
+    depends_on:
+      - yolo-service
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - PORT=3000
+      - YOLO_SERVICE_URL=http://yolo-service:8000/segment

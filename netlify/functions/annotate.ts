@@ -154,8 +154,8 @@ Return ONLY raw JSON with an "objects" key containing an array of objects.
 Format:
 {
   "objects": [
-    {"label": "house", "box": [ymin, xmin, ymax, xmax]},
-    {"label": "skyscraper", "box": [ymin, xmin, ymax, xmax]}
+    {"label": "house", "box":  [xmin, ymin, xmax, ymax]},
+    {"label": "skyscraper", "box":  [xmin, ymin, xmax, ymax]}
   ]
 }
 
