@@ -1,12 +1,14 @@
 import express from "express";
 import cors from "cors";
+import { createServer } from "http";
+import { Server } from "socket.io";
 import {
   GoogleGenerativeAI,
   SchemaType,
   type Schema,
 } from "@google/generative-ai";
 import dotenv from "dotenv";
-import fs from "fs";
+import { promises as fs } from "fs";
 
 dotenv.config();
 
@@ -15,6 +17,8 @@ dotenv.config();
 // ============================================================================
 const MODEL_NAME = "gemini-3-pro-image"; // Use the 'models/' prefix
 const PORT = process.env.PORT || 3000;
+const YOLO_SERVICE_URL =
+  process.env.YOLO_SERVICE_URL || "http://127.0.0.1:8000/segment";
 
 const annotationSchema: Schema = {
   type: SchemaType.OBJECT,
@@ -81,6 +85,12 @@ const corsOptions: cors.CorsOptions = {
 // Express Setup
 // ============================================================================
 const app = express();
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
+  },
+});
 
 app.use(cors(corsOptions));
 app.use(express.json({ limit: "20mb" }));
@@ -108,6 +118,72 @@ function buildPrompt(clickX: any, clickY: any): string {
     - If the click hits furniture, be specific about its style or materials.
     - No markdown, no backticks.
   `;
+}
+
+function buildDescriptionPrompt(label: string): string {
+  return `
+    You are writing museum wall text.
+    The highlighted object label is "${label}".
+    
+    Write an engaging museum-style description in 2-3 sentences.
+    Return ONLY raw JSON:
+    {
+      "description": "string"
+    }
+    No markdown or backticks.
+  `;
+}
+
+async function callYoloService(
+  image: string,
+): Promise<{ mask: unknown; label: string }> {
+  const response = await fetch(YOLO_SERVICE_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`YOLO service failed with status ${response.status}`);
+  }
+
+  const yolo = (await response.json()) as { mask?: unknown; label?: string };
+  return {
+    mask: yolo.mask ?? [],
+    label: yolo.label ?? "unknown",
+  };
+}
+
+async function callGeminiDescription(
+  imageBase64: string,
+  label: string,
+): Promise<{ description: string }> {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("Missing GEMINI_API_KEY");
+  }
+
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  const model = genAI.getGenerativeModel({
+    model: MODEL_NAME,
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: SchemaType.OBJECT,
+        properties: {
+          description: { type: SchemaType.STRING },
+        },
+        required: ["description"],
+      },
+    },
+  });
+
+  const result = await model.generateContent([
+    buildDescriptionPrompt(label),
+    { inlineData: { data: imageBase64, mimeType: "image/jpeg" } },
+  ]);
+
+  const parsed = JSON.parse(result.response.text()) as { description?: string };
+  return { description: parsed.description ?? "" };
 }
 
 // ============================================================================
@@ -156,7 +232,10 @@ app.post(
 
       // Write a debug snapshot
       const base64Data = image.includes(",") ? image.split(",")[1] : image;
-      fs.writeFileSync("debug_snapshot.jpg", Buffer.from(base64Data, "base64"));
+      await fs.writeFile(
+        "debug_snapshot.jpg",
+        Buffer.from(base64Data, "base64"),
+      );
 
       // Call Gemini
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -185,9 +264,53 @@ app.post(
   },
 );
 
+io.on("connection", (socket) => {
+  socket.on(
+    "request_annotation",
+    async ({
+      image,
+      clickX,
+      clickY,
+    }: {
+      image: string;
+      box?: number[];
+      clickX?: number;
+      clickY?: number;
+    }) => {
+      try {
+        if (!image || !image.startsWith("data:image/jpeg")) {
+          throw new Error("Invalid image format");
+        }
+
+        const base64Data = image.includes(",") ? image.split(",")[1] : image;
+        await fs.writeFile(
+          "debug_snapshot.jpg",
+          Buffer.from(base64Data, "base64"),
+        );
+
+        // 1. Instant YOLO response
+        const yolo = await callYoloService(image);
+        socket.emit("mask_ready", { mask: yolo.mask, label: yolo.label });
+
+        // 2. Gemini response with museum-style description
+        const gemini = await callGeminiDescription(base64Data, yolo.label);
+        socket.emit("description_ready", {
+          description: gemini.description,
+          clickX,
+          clickY,
+        });
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Vision pipeline failed";
+        socket.emit("error", message);
+      }
+    },
+  );
+});
+
 // ============================================================================
 // Start Server
 // ============================================================================
-app.listen(PORT, () =>
-  console.log(`Annotation server running on port ${PORT}`),
+httpServer.listen(PORT, () =>
+  console.log(`Annotation server (HTTP + WebSockets) running on port ${PORT}`),
 );
