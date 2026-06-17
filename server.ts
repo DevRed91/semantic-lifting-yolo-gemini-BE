@@ -98,13 +98,14 @@ app.use(express.json({ limit: "20mb" }));
 // ============================================================================
 // Helpers
 // ============================================================================
+const relevantYoloClasses = ["chair", "sofa", "bed", "dining table", "potted plant"];
 function buildPrompt(clickX: any, clickY: any): string {
   return `
     Analyze this 3D scene snapshot. The user has clicked on the coordinates (x: ${clickX}, y: ${clickY}).
     
     TASK:
-    1. Identify the specific object located exactly at those coordinates.
-    2. Provide a descriptive label (e.g., "Regency-style Armchair").
+    1. Identify the object. You MUST prioritize labels from this list: [${relevantYoloClasses.join(", ")}].
+    2. If the object matches one of the prioritized labels, use it directly (e.g., if the object is a chair, the label MUST be "chair").
     3. Provide an engaging, museum-style description of the object (2-3 sentences).
     
     Return ONLY raw JSON in this format:
@@ -114,9 +115,12 @@ function buildPrompt(clickX: any, clickY: any): string {
     }
 
     Rules:
-    - Coordinates are normalized 0-1 (0,0 is top-left).
-    - If the click hits furniture, be specific about its style or materials.
-    - No markdown, no backticks.
+      1. 'label' MUST be descriptive based on the structure (e.g., 'house', 'apartment', 'skyscraper', 'commercial_building').
+      2. If no structure found, return {"objects": []}.
+      3. No markdown, no backticks, no explanatory text.
+      4. Use normalized 0-1 coordinates.
+      5. CRITICAL: Do not label the sky, streets, vegetation, or general 'background' as a building. Only include the actual architectural structure.
+      6. If a building is partially blocked by a tree or pole, still include it and draw the box around the visible structure.
   `;
 }
 
@@ -136,11 +140,13 @@ function buildDescriptionPrompt(label: string): string {
 
 async function callYoloService(
   image: string,
+  clickX?: number,
+  clickY?: number,
 ): Promise<{ mask: unknown; label: string }> {
   const response = await fetch(YOLO_SERVICE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ image }),
+    body: JSON.stringify({ image, clickX, clickY }),
   });
 
   if (!response.ok) {
@@ -289,7 +295,7 @@ io.on("connection", (socket) => {
         );
 
         // 1. Instant YOLO response
-        const yolo = await callYoloService(image);
+        const yolo = await callYoloService(image, clickX, clickY);
         socket.emit("mask_ready", { mask: yolo.mask, label: yolo.label });
 
         // 2. Gemini response with museum-style description

@@ -6,7 +6,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - YOLO_MODEL=yolov8n-seg.pt
+      - YOLO_MODEL=yolov8m-seg.pt
       - YOLO_CONF=0.25
       - YOLO_IOU=0.45
 

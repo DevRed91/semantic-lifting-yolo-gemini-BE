@@ -50,6 +50,6 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ## Config
 
-- `YOLO_MODEL` (default: `yolov8n-seg.pt`)
+- `YOLO_MODEL` (default: `yolov8m-seg.pt`)
 - `YOLO_CONF` (default: `0.25`)
 - `YOLO_IOU` (default: `0.45`)
