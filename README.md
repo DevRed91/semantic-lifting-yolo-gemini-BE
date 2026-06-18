@@ -1,22 +1,483 @@
-### 1. The Implementation Flow
-In [server.ts](file:///c:/Projects/Agents/gemini-test/gemini-test/server.ts), the core integration happens inside the **WebSocket connection handler** (`io.on("connection", ...)`):
+# Semantic Lifting Backend
 
-1. **User Action:** The client sends a `"request_annotation"` event containing the image data and the click coordinates (`clickX`, `clickY`).
-2. **Step 1 — Instant YOLO Response:** 
-   * The server immediately forwards the image and click coordinates to a local YOLO segmentation service ([server.ts:L298](file:///c:/Projects/Agents/gemini-test/gemini-test/server.ts#L298)).
-   * The YOLO service performs fast instance segmentation and returns a visual segmentation `mask` and a class `label` (e.g., `"sofa"` or `"chair"`).
-   * The server emits a `"mask_ready"` event to the client instantly, allowing the UI to render the outline without delay.
-3. **Step 2 — Gemini Enrichment (Asynchronous):**
-   * The server then calls Gemini (`callGeminiDescription`) asynchronously ([server.ts:L302](file:///c:/Projects/Agents/gemini-test/gemini-test/server.ts#L302)).
-   * Gemini takes the image and the YOLO-detected label, analyzes the context, and generates an engaging, museum-style description of the object.
-   * Once Gemini finishes, the server emits `"description_ready"` to update the UI with the detailed description.
+High-performance Spatial AI backend for Gaussian Splat environments.
+
+This service combines **YOLOv8 Instance Segmentation**, **Gemini Vision-Language Reasoning**, and **3D Spatial Grounding** to transform photorealistic Gaussian Splat scenes into searchable, semantically aware environments.
 
 ---
 
-### 2. Benefits of Combining YOLO & Gemini
+## Overview
 
-| Feature | YOLO Service | Gemini (VLM) | Combined Benefit |
-| :--- | :--- | :--- | :--- |
-| **Speed / Latency** | **Extremely Fast** (Milliseconds) | **Slower** (Seconds) | **Immediate User Feedback:** The user sees the visual selection mask instantly (YOLO), while the detailed text description loads progressively (Gemini). |
-| **Spatial Precision** | **High Precision** (Pixel-perfect mask/contours) | **Low Precision** (Coordinates/rough boxes) | **Perfect Contours:** VLMs struggle with pixel-perfect visual segmentation. YOLO handles the spatial boundaries perfectly, while Gemini handles the conceptual context. |
-| **Semantic Depth** | **Limited** (Discrete class names, e.g., "sofa") | **Unlimited** (Rich natural language, museum descriptions) | **Rich Contextual UX:** YOLO identifies *what* and *where* the object is, while Gemini describes the *details*, *aesthetics*, and *story* behind it. |
+The backend powers a Semantic Lifting pipeline that allows users to:
+
+* Click on objects inside a Gaussian Splat scene
+* Perform real-time object segmentation
+* Generate rich AI descriptions
+* Register objects in 3D world space
+* Build persistent spatial understanding of environments
+
+The architecture is designed around a **Dual-Speed AI Pipeline**:
+
+1. **Fast Vision Layer (YOLOv8)**
+
+   * Millisecond-level segmentation
+   * Pixel-accurate masks
+   * Immediate visual feedback
+
+2. **Semantic Reasoning Layer (Gemini)**
+
+   * Context-aware object understanding
+   * Rich natural language descriptions
+   * Spatial metadata enrichment
+
+This approach delivers both responsiveness and deep semantic intelligence.
+
+---
+
+# Architecture
+
+```text
+Client Viewer
+     │
+     ▼
+Socket.IO WebSocket
+     │
+     ▼
+┌──────────────────────────┐
+│      FastAPI Server      │
+└──────────────────────────┘
+          │
+          │
+     ┌────┴────┐
+     ▼         ▼
+YOLOv8      Gemini
+Segmentation  Reasoning
+     │         │
+     ▼         ▼
+mask_ready  description_ready
+     │         │
+     └────┬────┘
+          ▼
+Spatial Annotation System
+```
+
+---
+
+# Core Components
+
+## 1. Interactive Segmentation Service (`main.py`)
+
+The primary inference service responsible for user-driven object selection and segmentation.
+
+### Responsibilities
+
+* Object segmentation
+* Instance selection
+* Click-to-object mapping
+* ROI optimization
+* Full-resolution mask generation
+
+### Model
+
+```text
+YOLOv8 Medium Segmentation
+(yolov8m-seg.pt)
+```
+
+### Key Features
+
+#### Region of Interest (ROI) Processing
+
+Instead of running inference across the entire image, the service crops a centered region before processing.
+
+Benefits:
+
+* Faster inference
+* Reduced background noise
+* Higher object accuracy
+* Improved small-object detection
+
+#### Interactive Instance Selection
+
+When multiple objects are detected, the service determines the intended target using a multi-stage selection strategy.
+
+##### Tier 1 — Direct Mask Hit
+
+Checks whether the click intersects a segmentation mask.
+
+##### Tier 2 — Bounding Box Selection
+
+Falls back to bounding box containment.
+
+##### Tier 3 — Nearest Object
+
+Chooses the nearest detected object when no overlap exists.
+
+##### No Click Provided
+
+Returns the highest-confidence detection.
+
+---
+
+## 2. Startup Scene Scanner (`sofa_scan.py`)
+
+A specialized high-speed scanning service mounted under:
+
+```text
+/api
+```
+
+Designed to build an initial spatial understanding of a scene before user interaction begins.
+
+### Model
+
+```text
+YOLOv8 Nano Segmentation
+(yolov8n-seg.pt)
+```
+
+### Purpose
+
+* Detect major furniture anchors
+* Build initial spatial maps
+* Support object localization
+* Enable semantic scene initialization
+
+### Optimizations
+
+#### Targeted Class Detection
+
+Restricted to:
+
+```text
+COCO Class 57 (Sofa)
+```
+
+This dramatically reduces inference cost.
+
+#### Reduced Input Resolution
+
+```text
+480px
+```
+
+instead of
+
+```text
+1024px
+```
+
+for maximum throughput.
+
+#### Payload Compression
+
+Generated masks are compressed to:
+
+```text
+128 × 128
+```
+
+before transmission.
+
+Benefits:
+
+* Reduced network overhead
+* Faster startup scans
+* Lower memory consumption
+
+---
+
+# WebSocket Pipeline
+
+The backend uses Socket.IO for real-time communication.
+
+## request_annotation
+
+Client sends:
+
+```json
+{
+  "image": "base64",
+  "clickX": 0.42,
+  "clickY": 0.61
+}
+```
+
+The backend immediately begins the annotation workflow.
+
+---
+
+## Event: mask_ready
+
+Generated by YOLO.
+
+Returns:
+
+```json
+{
+  "label": "sofa",
+  "mask": [...]
+}
+```
+
+Purpose:
+
+* Immediate visual feedback
+* GPU highlighting
+* Spatial anchoring
+
+Latency target:
+
+```text
+Milliseconds
+```
+
+---
+
+## Event: description_ready
+
+Generated by Gemini.
+
+Returns:
+
+```json
+{
+  "description": "..."
+}
+```
+
+Purpose:
+
+* Semantic enrichment
+* Historical context
+* Object interpretation
+
+Latency target:
+
+```text
+Seconds
+```
+
+Because it runs asynchronously, the user receives immediate visual feedback while deeper reasoning continues in the background.
+
+---
+
+# Why YOLO + Gemini?
+
+| Capability             | YOLOv8         | Gemini    | Combined Result            |
+| ---------------------- | -------------- | --------- | -------------------------- |
+| Speed                  | Excellent      | Moderate  | Instant UX                 |
+| Segmentation           | Pixel Accurate | Limited   | Precise Object Selection   |
+| Semantic Understanding | Limited        | Excellent | Rich Context               |
+| Object Localization    | Excellent      | Limited   | Accurate Spatial Grounding |
+| Reasoning              | Limited        | Excellent | Deep Object Intelligence   |
+
+YOLO determines:
+
+```text
+What object was selected?
+Where is it located?
+```
+
+Gemini determines:
+
+```text
+What does it mean?
+Why is it important?
+What context surrounds it?
+```
+
+---
+
+# Spatial Intelligence Layer
+
+The backend extends beyond segmentation by maintaining object understanding in 3D space.
+
+## GeometricContextManager
+
+Responsible for:
+
+* Point-cloud clustering
+* Object registration
+* Spatial querying
+* Instance retrieval
+* Noise filtering
+
+---
+
+## DBSCAN Clustering
+
+Detected object points are grouped using:
+
+```text
+DBSCAN
+```
+
+Parameters:
+
+```text
+Radius (eps): 0.4 meters
+Minimum points: 10
+```
+
+### Benefits
+
+#### Noise Removal
+
+Eliminates floating outlier points.
+
+#### Automatic Instance Discovery
+
+No need to predefine object counts.
+
+#### Arbitrary Shape Support
+
+Works with:
+
+* Sectional sofas
+* Curved furniture
+* Irregular geometry
+
+---
+
+## Target Object Resolution
+
+Given a user position:
+
+```typescript
+getTargetInstance(className, userPosition)
+```
+
+The system:
+
+1. Calculates centroids
+2. Computes distances
+3. Selects nearest object instance
+4. Returns object bounds
+
+This enables semantic search and object navigation.
+
+---
+
+# Performance Optimizations
+
+## ROI-Based Inference
+
+Only process relevant image regions.
+
+---
+
+## Dual Model Strategy
+
+### YOLOv8M
+
+Used for:
+
+```text
+Interactive Segmentation
+```
+
+### YOLOv8N
+
+Used for:
+
+```text
+Startup Scene Scanning
+```
+
+This balances accuracy and throughput.
+
+---
+
+## Thread Pool Offloading
+
+Heavy inference operations execute on FastAPI worker threads instead of blocking the main ASGI event loop.
+
+Benefits:
+
+* Higher concurrency
+* Improved responsiveness
+* Stable websocket communication
+
+---
+
+## Compressed Mask Transport
+
+```text
+Full Resolution
+       ↓
+128×128 Binary Mask
+       ↓
+JSON Transport
+```
+
+Reduces payload size while preserving object shape.
+
+---
+
+# API Endpoints
+
+## Interactive Annotation
+
+```http
+POST /annotate
+```
+
+Returns segmentation masks and labels.
+
+---
+
+## Startup Sofa Scan
+
+```http
+POST /api/startup-scan-sofa
+```
+
+Returns compressed sofa segmentation masks for scene initialization.
+
+---
+
+# Technology Stack
+
+### Backend
+
+* FastAPI
+* Socket.IO
+* Python
+
+### Computer Vision
+
+* YOLOv8 Segmentation
+* OpenCV
+* Pillow
+
+### AI
+
+* Google Gemini
+
+### Spatial Computing
+
+* DBSCAN Clustering
+* Point Cloud Processing
+* Geometric Context Mapping
+
+---
+
+# Future Roadmap
+
+* Multi-class scene scanning
+* Semantic scene graphs
+* Natural language object search
+* Spatial memory persistence
+* Construction progress tracking
+* Object relationship reasoning
+* Semantic navigation
+* Autonomous scene indexing
+
+---
+
+# Vision
+
+The future of AI is not understanding images—it is understanding space.
+
+This backend transforms Gaussian Splats from static visual reconstructions into interactive spatial environments that can be searched, queried, and understood through natural language.
