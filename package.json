@@ -17,7 +17,8 @@
   },
   "scripts": {
     "start": "node server.ts",
-    "start:demo": "ts-node index.ts"
+    "start:demo": "ts-node index.ts",
+    "dev": "concurrently \"docker-compose up\" \"node server.ts\""
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
